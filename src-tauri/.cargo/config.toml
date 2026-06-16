@@ -1,0 +1,6 @@
+[env]
+CC = { value = "C:/Users/glkj_/mingw64/bin/gcc.exe", force = true }
+AR = { value = "C:/Users/glkj_/mingw64/bin/ar.exe", force = true }
+WINDRES = { value = "C:/Users/glkj_/mingw64/bin/windres.exe", force = true }
+PROTOC = { value = "C:/Users/glkj_/protoc/bin/protoc.exe", force = true }
+TESSDATA_PREFIX = { value = "C:/Users/glkj_/tesseract/tessdata", force = true }
