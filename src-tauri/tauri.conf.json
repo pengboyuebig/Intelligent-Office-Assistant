@@ -29,6 +29,11 @@
   "bundle": {
     "active": true,
     "targets": "nsis",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    },
     "resources": {
       "WebView2Loader.dll": "./"
     },
