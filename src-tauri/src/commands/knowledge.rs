@@ -442,17 +442,24 @@ async fn upload_local_document(
         .map_err(|e| e.to_string())?;
 
     if let Some(embeddings) = chunk_embeddings {
+        let mut chroma_ids = Vec::new();
+        let mut chroma_vecs = Vec::new();
+        let mut chroma_docs = Vec::new();
+        let mut chroma_metas = Vec::new();
+
         for (index, chunk) in chunks.iter().enumerate() {
             if let Some(embedding) = embeddings.get(index) {
-                let _ = chroma_adapter
-                    .upsert_vectors(
-                        vec![chunk_ids[index].clone()],
-                        vec![embedding.clone()],
-                        vec![chunk.clone()],
-                        vec![serde_json::json!({ "kb_id": knowledge_base_id })],
-                    )
-                    .await;
+                chroma_ids.push(chunk_ids[index].clone());
+                chroma_vecs.push(embedding.clone());
+                chroma_docs.push(chunk.clone());
+                chroma_metas.push(serde_json::json!({ "kb_id": knowledge_base_id }));
             }
+        }
+
+        if !chroma_ids.is_empty() {
+            let _ = chroma_adapter
+                .upsert_vectors(chroma_ids, chroma_vecs, chroma_docs, chroma_metas)
+                .await;
         }
     }
 

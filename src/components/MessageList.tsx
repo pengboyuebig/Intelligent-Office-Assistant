@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Copy, Check } from "lucide-react";
 import { useChatStore, Message } from "@/stores/chatStore";
 import { cn } from "@/lib/utils";
@@ -54,6 +55,46 @@ function MessageBubble({ msg, isStreaming }: { msg: Message; isStreaming?: boole
     ? new Date(msg.created_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
     : "";
 
+  const markdownComponents = useMemo(
+    () => ({
+      pre({ children }: { children?: React.ReactNode }) {
+        return <>{children}</>;
+      },
+      code({
+        className,
+        children,
+        ...props
+      }: {
+        className?: string;
+        children?: React.ReactNode;
+      }) {
+        const match = /language-(\w+)/.exec(className || "");
+        const codeStr = String(children).replace(/\n$/, "");
+        if (match) {
+          return <CodeBlock language={match[1]} code={codeStr} />;
+        }
+        return (
+          <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+            {children}
+          </code>
+        );
+      },
+      a({ href, children }: { href?: string; children?: React.ReactNode }) {
+        return (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline underline-offset-4 hover:opacity-80"
+          >
+            {children}
+          </a>
+        );
+      },
+    }),
+    [],
+  );
+
   return (
     <div className={cn("flex mb-4 group", isUser ? "justify-end" : "justify-start")}>
       <div className={cn("flex flex-col max-w-[75%]", isUser ? "items-end" : "items-start")}>
@@ -70,40 +111,13 @@ function MessageBubble({ msg, isStreaming }: { msg: Message; isStreaming?: boole
           ) : (
             <div className="markdown-body text-sm leading-relaxed">
               {msg.content ? (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    pre({ children }) {
-                      return <>{children}</>;
-                    },
-                    code({ node, className, children, ...props }) {
-                      const match = /language-(\w+)/.exec(className || "");
-                      const codeStr = String(children).replace(/\n$/, "");
-                      if (match) {
-                        return <CodeBlock language={match[1]} code={codeStr} />;
-                      }
-                      return (
-                        <code className="bg-muted px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
-                          {children}
-                        </code>
-                      );
-                    },
-                    a({ href, children }) {
-                      return (
-                        <a
-                          href={href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary underline underline-offset-4 hover:opacity-80"
-                        >
-                          {children}
-                        </a>
-                      );
-                    },
-                  }}
-                >
-                  {msg.content}
-                </ReactMarkdown>
+                isStreaming ? (
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                ) : (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                    {msg.content}
+                  </ReactMarkdown>
+                )
               ) : null}
               {isStreaming && !msg.content && (
                 <span className="thinking-dots">
@@ -138,15 +152,33 @@ function MessageBubble({ msg, isStreaming }: { msg: Message; isStreaming?: boole
   );
 }
 
+const MemoMessageBubble = memo(MessageBubble, (prev, next) => {
+  return (
+    prev.msg.id === next.msg.id &&
+    prev.msg.content === next.msg.content &&
+    prev.msg.role === next.msg.role &&
+    prev.isStreaming === next.isStreaming
+  );
+});
+
 export default function MessageList() {
   const messages = useChatStore((s) => s.messages);
   const streaming = useChatStore((s) => s.streaming);
   const currentId = useChatStore((s) => s.currentId);
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 80,
+    overscan: 5,
+  });
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (messages.length > 0) {
+      virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "smooth" });
+    }
+  }, [messages.length, streaming, virtualizer]);
 
   if (messages.length === 0) {
     return (
@@ -195,15 +227,35 @@ export default function MessageList() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-6">
-      <div className="max-w-3xl mx-auto">
-        {messages.map((msg, i) => {
-          const isLast = i === messages.length - 1;
+    <div ref={parentRef} className="flex-1 overflow-y-auto px-8 py-6">
+      <div
+        className="max-w-3xl mx-auto relative"
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const msg = messages[virtualItem.index];
+          const isLast = virtualItem.index === messages.length - 1;
           const isAssistant = msg.role === "assistant";
           const isStreamingMsg = isLast && isAssistant && streaming;
-          return <MessageBubble key={msg.id || i} msg={msg} isStreaming={isStreamingMsg} />;
+          return (
+            <div
+              key={msg.id || virtualItem.index}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <MemoMessageBubble msg={msg} isStreaming={isStreamingMsg} />
+            </div>
+          );
         })}
-        <div ref={bottomRef} />
       </div>
     </div>
   );

@@ -54,7 +54,19 @@ function buildApiMessages(
     apiMessages.push({ role: "system", content: `参考以下知识：\n${knowledgeContext}` });
   }
 
-  for (const message of messages) {
+  const maxHistory = 10;
+  const recentMessages = messages.length > maxHistory
+    ? messages.slice(messages.length - maxHistory)
+    : messages;
+
+  if (messages.length > recentMessages.length) {
+    apiMessages.push({
+      role: "system",
+      content: `（此前对话已省略较早的 ${messages.length - recentMessages.length} 条消息）`,
+    });
+  }
+
+  for (const message of recentMessages) {
     apiMessages.push({ role: message.role, content: message.content });
   }
 
@@ -89,20 +101,39 @@ async function initializeStreamListeners() {
         return { messages };
       });
     },
-    finishStream: (_taskId, messageFactory) => {
+    finishStream: async (_taskId, messageFactory) => {
+      const { currentId, messages: currentMessages } = useChatStore.getState();
+      if (!currentId) {
+        return;
+      }
+
+      const streamIndex = currentMessages.findIndex((message) => message.id === "streaming");
+      if (streamIndex < 0) {
+        useChatStore.setState({ streaming: false, currentTaskId: null });
+        return;
+      }
+
+      const completedMessage = messageFactory();
+      completedMessage.content = currentMessages[streamIndex].content || "(空回复)";
+
+      try {
+        const savedMessage = await invoke<Message>("add_message", {
+          conversationId: currentId,
+          role: "assistant",
+          content: completedMessage.content,
+        });
+        completedMessage.id = savedMessage.id;
+        completedMessage.created_at = savedMessage.created_at;
+      } catch (error) {
+        console.error("保存 assistant 消息失败:", error);
+      }
+
       useChatStore.setState((state) => {
-        if (!state.streaming) {
-          return state;
-        }
-
         const messages = [...state.messages];
-        const streamIndex = messages.findIndex((message) => message.id === "streaming");
-        if (streamIndex >= 0) {
-          const completedMessage = messageFactory();
-          completedMessage.content = messages[streamIndex].content || "(空回复)";
-          messages[streamIndex] = completedMessage;
+        const idx = messages.findIndex((message) => message.id === "streaming");
+        if (idx >= 0) {
+          messages[idx] = completedMessage;
         }
-
         return {
           messages,
           streaming: false,
@@ -219,8 +250,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().loadConversations();
 
     try {
+      const apiBase = settings.apiBaseUrl.replace(/\/+$/, "");
+      const isLocal =
+        apiBase.includes("localhost") ||
+        apiBase.includes("127.0.0.1") ||
+        apiBase.startsWith("http://10.") ||
+        apiBase.startsWith("http://192.168.");
+
+      if (!settings.apiKey && !isLocal) {
+        throw new Error(
+          "当前目标地址不是本地服务，且未配置 API Key。请在设置中填写 API Key 后再试。",
+        );
+      }
+
       const taskId = await invoke<string>("chat_stream_proxy", {
-        apiBase: settings.apiBaseUrl.replace(/\/+$/, ""),
+        apiBase,
         model: settings.chatModel,
         messages: buildApiMessages(historyMessages, content, skillSystemPrompt, knowledgeContext),
         apiKey: settings.apiKey || undefined,
@@ -229,11 +273,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ currentTaskId: taskId });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
+      let userMessage = message;
+      if (message.includes("401") || message.toLowerCase().includes("authentication") || message.toLowerCase().includes("unauthorized")) {
+        userMessage = settings.apiKey
+          ? `API 鉴权失败：当前 API Key 无效或已过期。请检查设置中的 API Key。\n原始错误：${message}`
+          : `API 鉴权失败：当前未配置 API Key。请在设置中填写 API Key（DeepSeek 需填写 deepseek_api_key；Ollama 若使用远程地址也可能需要 Key）。\n原始错误：${message}`;
+      }
       set((state) => ({
         messages: state.messages.filter((item) => item.id !== "streaming"),
         streaming: false,
         currentTaskId: null,
-        error: `发送失败: ${message}`,
+        error: `发送失败: ${userMessage}`,
       }));
     }
   },

@@ -126,7 +126,6 @@ async fn do_chat_stream(
         "messages": messages,
         "stream": true,
         "temperature": 0.7,
-        "max_tokens": 2048,
     }));
 
     if let Some(key) = &api_key {
@@ -142,14 +141,35 @@ async fn do_chat_stream(
     }
 
     let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
     while let Some(chunk) = stream.next().await {
         if cancel_flag.load(Ordering::Relaxed) {
             return Ok(());
         }
 
         let chunk = chunk.map_err(|e| format!("流读取错误: {e}"))?;
-        let text = String::from_utf8_lossy(&chunk);
-        for line in text.lines() {
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        if !buffer.contains('\n') {
+            continue;
+        }
+
+        let text = buffer.clone();
+        let lines: Vec<&str> = text.lines().collect();
+        buffer.clear();
+
+        if !text.ends_with('\n') {
+            if let Some(last) = lines.last() {
+                buffer.push_str(last);
+            }
+        }
+
+        for line in &lines {
+            let line = *line;
+            if !buffer.is_empty() && line == *lines.last().unwrap_or(&"") && !text.ends_with('\n') {
+                continue;
+            }
+
             if cancel_flag.load(Ordering::Relaxed) {
                 return Ok(());
             }

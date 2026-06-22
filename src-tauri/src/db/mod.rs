@@ -86,6 +86,11 @@ impl Database {
                 value TEXT NOT NULL
             );
 
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
+            CREATE INDEX IF NOT EXISTS idx_documents_kb ON documents(knowledge_base_id);
+            CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(knowledge_base_id);
+            CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
+
             INSERT OR IGNORE INTO settings (key, value) VALUES ('api_base_url', 'http://localhost:11434/v1');
             INSERT OR IGNORE INTO settings (key, value) VALUES ('embedding_model', 'nomic-embed-text');
             INSERT OR IGNORE INTO settings (key, value) VALUES ('chat_model', 'qwen3-vl:4b');
