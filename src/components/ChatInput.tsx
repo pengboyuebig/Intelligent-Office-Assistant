@@ -150,7 +150,7 @@ export default function ChatInput() {
           )}
 
           {/* 技能分组选择器 */}
-          <select
+          {/* <select
             value={selectedGroupId}
             onChange={(e) => setSelectedGroupId(e.target.value)}
             className="text-xs px-2.5 py-1 rounded-lg border border-border bg-background outline-none focus:border-primary transition-colors cursor-pointer"
@@ -164,7 +164,7 @@ export default function ChatInput() {
                 </option>
               );
             })}
-          </select>
+          </select> */}
 
           {/* 选中分组提示 */}
           {selectedGroupId && groupSkillCount > 0 && (

@@ -18,7 +18,7 @@ type NavItem = "chat" | "knowledge" | "skills" | "settings";
 const navItems: { id: NavItem; label: string; icon: React.ReactNode }[] = [
   { id: "chat", label: "智能问答", icon: <MessageSquare size={18} /> },
   { id: "knowledge", label: "文档中心", icon: <BookOpen size={18} /> },
-  { id: "skills", label: "工作流", icon: <Puzzle size={18} /> },
+  // { id: "skills", label: "工作流", icon: <Puzzle size={18} /> },
   { id: "settings", label: "系统设置", icon: <Settings size={18} /> },
 ];
 
