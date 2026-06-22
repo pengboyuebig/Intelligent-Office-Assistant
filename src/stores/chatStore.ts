@@ -257,7 +257,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         apiBase.startsWith("http://10.") ||
         apiBase.startsWith("http://192.168.");
 
-      if (!settings.apiKey && !isLocal) {
+      const trimmedApiKey = settings.apiKey?.trim();
+      const apiKey = trimmedApiKey ? trimmedApiKey : undefined;
+
+      if (!apiKey && !isLocal) {
         throw new Error(
           "当前目标地址不是本地服务，且未配置 API Key。请在设置中填写 API Key 后再试。",
         );
@@ -267,7 +270,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         apiBase,
         model: settings.chatModel,
         messages: buildApiMessages(historyMessages, content, skillSystemPrompt, knowledgeContext),
-        apiKey: settings.apiKey || undefined,
+        apiKey,
       });
 
       set({ currentTaskId: taskId });
