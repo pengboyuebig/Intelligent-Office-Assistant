@@ -203,6 +203,26 @@ sudo systemctl restart postgresql
 
 > 生产环境建议把 `0.0.0.0/0` 改为具体内网网段。
 
+### 4.4 旧数据库升级到 RBAC 版本
+
+如果你的 PostgreSQL 已经运行过旧版 schema（没有 `users`、`owner_id`、`is_public` 字段），执行升级脚本：
+
+```bash
+# 将 chromaVersion/sql/migrate_postgres_to_rbac.sql 复制到服务器后执行
+docker exec -i postgres psql -U postgres -d chroma_db < migrate_postgres_to_rbac.sql
+
+# 原生部署
+sudo -u postgres psql -d chroma_db -f migrate_postgres_to_rbac.sql
+```
+
+升级脚本会：
+1. 创建 `users` 表
+2. 给 `knowledge_bases` 增加 `owner_id` / `is_public` 字段
+3. 将已有知识库标记为公开（避免普通用户突然看不到旧数据）
+4. 插入默认的 `admin` / `ptyh` 账号
+
+> 生产环境请在升级后尽快修改默认密码。
+
 ---
 
 ## 五、LLM 推理服务部署
@@ -309,13 +329,24 @@ Intelligent Office Assistant (Chroma Edition)_0.1.0_x64-setup.exe
 
 ## 八、数据存储策略
 
-| 数据类型 | 存储位置 | 是否共享 | 删除策略 |
-|---------|---------|---------|---------|
-| 对话记录 | 本地 SQLite | 否（每个用户本地） | 用户手动删除 |
-| 应用设置 | 本地 SQLite | 否 | 用户手动修改 |
-| 本地知识库 | 本地 SQLite + 本地 Chroma | 否 | 用户手动删除 |
-| 共享知识库 | 远程 PostgreSQL + 远程 Chroma | 是 | 用户手动删除 |
-| 共享技能模板 | 远程 PostgreSQL | 是 | 用户手动删除 |
+| 数据类型 | 存储位置 | 是否共享 | 删除策略 | 权限控制 |
+|---------|---------|---------|---------|---------|
+| 对话记录 | 本地 SQLite | 否（每个用户本地） | 用户手动删除 | 本地当前用户 |
+| 应用设置 | 本地 SQLite | 否 | 用户手动修改 | 本地当前用户 |
+| 本地知识库 | 本地 SQLite + 本地 Chroma | 否 | 用户手动删除 | 本地当前用户 |
+| 共享知识库 | 远程 PostgreSQL + 远程 Chroma | 是 | 用户手动删除 | 基于 `users.role` 的 RBAC |
+| 共享技能模板 | 远程 PostgreSQL | 是 | 用户手动删除 | 管理员可管理，普通用户可查看 |
+
+### 用户与权限
+
+本地 SQLite 和远程 PostgreSQL 均包含 `users` 表，内置两个默认账号：
+
+| 用户名 | 密码 | 角色 | 权限 |
+|--------|------|------|------|
+| `admin` | `admin123` | 管理员 | 可创建公开知识库、删除所有知识库、上传文档到任意知识库 |
+| `ptyh` | `ptyh123` | 普通用户 | 只能创建自己的私有知识库，只能操作自己有权限的知识库 |
+
+> 生产环境请在首次部署后修改默认密码。客户端可在 **系统设置 → 当前用户** 中切换账号。
 
 ---
 
@@ -418,8 +449,9 @@ docker rm postgres
 
 | 文件 | 说明 |
 |------|------|
-| `chromaVersion/sql/schema_sqlite.sql` | SQLite 本地库 schema |
-| `chromaVersion/sql/schema_postgres.sql` | PostgreSQL 远程库 schema |
+| `chromaVersion/sql/schema_sqlite.sql` | SQLite 本地库 schema（全新部署） |
+| `chromaVersion/sql/schema_postgres.sql` | PostgreSQL 远程库 schema（全新部署） |
+| `chromaVersion/sql/migrate_postgres_to_rbac.sql` | 旧 PostgreSQL 库升级到 RBAC 版本的迁移脚本 |
 | `chromaVersion/sql/README.md` | 完整 SQL 汇总 |
 
 ### 13.2 相关端口

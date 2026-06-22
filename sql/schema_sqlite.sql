@@ -18,8 +18,21 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
     content TEXT NOT NULL DEFAULT '',
+    reasoning TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+
+-- 兼容已存在旧表
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reasoning TEXT;
+
+-- Users (local accounts + RBAC)
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 -- Knowledge bases
@@ -27,6 +40,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
+    owner_id TEXT NOT NULL DEFAULT 'system',
+    is_public INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
@@ -86,3 +101,8 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('remote_db_url', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('remote_db_enabled', 'false');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('chroma_endpoint', 'http://localhost:8000');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('chroma_enabled', 'false');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('current_user_id', 'ptyh');
+
+-- Default users (inserted only if missing)
+INSERT OR IGNORE INTO users (id, username, password, role) VALUES ('admin', 'admin', 'admin123', 'admin');
+INSERT OR IGNORE INTO users (id, username, password, role) VALUES ('ptyh', 'ptyh', 'ptyh123', 'user');

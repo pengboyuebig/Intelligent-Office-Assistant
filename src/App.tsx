@@ -7,6 +7,7 @@ import {
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/stores/chatStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import Titlebar from "./components/Titlebar";
 import ChatView from "./components/ChatView";
 import KnowledgeList from "./components/KnowledgeList";
@@ -33,6 +34,13 @@ export default function App() {
   const [activeNav, setActiveNav] = useState<NavItem>("chat");
   const error = useChatStore((s) => s.error);
   const clearError = useChatStore((s) => s.clearError);
+  const loadCurrentUser = useSettingsStore((s) => s.loadCurrentUser);
+  const loadSettings = useSettingsStore((s) => s.loadSettings);
+
+  useEffect(() => {
+    loadSettings();
+    loadCurrentUser();
+  }, [loadSettings, loadCurrentUser]);
 
   useEffect(() => {
     if (error) {

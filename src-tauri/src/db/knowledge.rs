@@ -9,6 +9,8 @@ pub struct KnowledgeBase {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub owner_id: String,
+    pub is_public: bool,
     pub created_at: String,
 }
 
@@ -27,43 +29,62 @@ impl Database {
         &self,
         name: &str,
         description: &str,
+        owner_id: &str,
+        is_public: bool,
     ) -> anyhow::Result<KnowledgeBase> {
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
         conn.execute(
-            "INSERT INTO knowledge_bases (id, name, description) VALUES (?1, ?2, ?3)",
-            params![id, name, description],
+            "INSERT INTO knowledge_bases (id, name, description, owner_id, is_public) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, description, owner_id, if is_public { 1 } else { 0 }],
         )?;
 
         Ok(KnowledgeBase {
             id,
             name: name.to_string(),
             description: description.to_string(),
+            owner_id: owner_id.to_string(),
+            is_public,
             created_at: String::new(),
         })
     }
 
-    pub fn get_knowledge_bases(&self) -> anyhow::Result<Vec<KnowledgeBase>> {
+    pub fn get_knowledge_bases(
+        &self,
+        current_user_id: &str,
+        is_admin: bool,
+    ) -> anyhow::Result<Vec<KnowledgeBase>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, description, created_at FROM knowledge_bases ORDER BY created_at DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
+        let sql = if is_admin {
+            "SELECT id, name, description, owner_id, is_public, created_at FROM knowledge_bases WHERE owner_id='system' OR owner_id=?1 ORDER BY created_at DESC"
+        } else {
+            "SELECT id, name, description, owner_id, is_public, created_at FROM knowledge_bases WHERE is_public=1 OR owner_id=?1 ORDER BY created_at DESC"
+        };
+        let mut stmt = conn.prepare(sql)?;
+        let mapper = |row: &rusqlite::Row| {
             Ok(KnowledgeBase {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 description: row.get(2)?,
-                created_at: row.get(3)?,
+                owner_id: row.get(3)?,
+                is_public: row.get::<_, i32>(4)? == 1,
+                created_at: row.get(5)?,
             })
-        })?;
+        };
+        let rows = if is_admin {
+            stmt.query_map([], mapper)?
+        } else {
+            stmt.query_map(params![current_user_id], mapper)?
+        };
 
         collect_rows(rows)
     }
 
-    pub fn delete_knowledge_base(&self, id: &str) -> anyhow::Result<()> {
+    pub fn delete_knowledge_base(&self, id: &str
+    ) -> anyhow::Result<bool> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM knowledge_bases WHERE id=?1", params![id])?;
-        Ok(())
+        Ok(conn.changes() > 0)
     }
 
     pub fn get_documents(&self, kb_id: &str) -> anyhow::Result<Vec<Document>> {

@@ -122,6 +122,80 @@ impl Database {
         }
     }
 
+    pub fn get_current_user(
+        &self,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let user_id = match self.get_setting("current_user_id")? {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, username, role FROM users WHERE id=?1 OR username=?1",
+        )?;
+        let mut rows = stmt.query_map(params![user_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "username": row.get::<_, String>(1)?,
+                "role": row.get::<_, String>(2)?,
+            }))
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn authenticate_user(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> anyhow::Result<Option<serde_json::Value>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, username, role FROM users WHERE username=?1 AND password=?2",
+        )?;
+        let mut rows = stmt.query_map(params![username, password], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "username": row.get::<_, String>(1)?,
+                "role": row.get::<_, String>(2)?,
+            }))
+        })?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn set_current_user(&self, user_id: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params!["current_user_id", user_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn create_user(
+        &self,
+        id: &str,
+        username: &str,
+        password: &str,
+        role: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO users (id, username, password, role) VALUES (?1, ?2, ?3, ?4)",
+            params![id, username, password, role],
+        )?;
+        Ok(serde_json::json!({
+            "id": id,
+            "username": username,
+            "role": role,
+        }))
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> anyhow::Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
@@ -130,4 +204,5 @@ impl Database {
         )?;
         Ok(())
     }
+
 }

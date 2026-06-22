@@ -20,6 +20,7 @@ pub struct Message {
     pub conversation_id: String,
     pub role: String,
     pub content: String,
+    pub reasoning: Option<String>,
     pub created_at: String,
 }
 
@@ -106,12 +107,14 @@ impl Database {
         conversation_id: &str,
         role: &str,
         content: &str,
+        reasoning: Option<&str>,
     ) -> anyhow::Result<Message> {
         let conn = self.conn.lock().unwrap();
         let id = Uuid::new_v4().to_string();
+        let reasoning_value = reasoning.map(|r| r.trim()).filter(|r| !r.is_empty());
         conn.execute(
-            "INSERT INTO messages (id, conversation_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-            params![id, conversation_id, role, content],
+            "INSERT INTO messages (id, conversation_id, role, content, reasoning) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, conversation_id, role, content, reasoning_value],
         )?;
         conn.execute(
             "UPDATE conversations SET updated_at=datetime('now','localtime') WHERE id=?1",
@@ -122,6 +125,7 @@ impl Database {
             conversation_id: conversation_id.to_string(),
             role: role.to_string(),
             content: content.to_string(),
+            reasoning: reasoning_value.map(|r| r.to_string()),
             created_at: String::new(),
         })
     }
@@ -129,7 +133,7 @@ impl Database {
     pub fn get_messages(&self, conversation_id: &str) -> anyhow::Result<Vec<Message>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, role, content, created_at
+            "SELECT id, conversation_id, role, content, reasoning, created_at
              FROM messages WHERE conversation_id=?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![conversation_id], |row| {
@@ -138,7 +142,8 @@ impl Database {
                 conversation_id: row.get(1)?,
                 role: row.get(2)?,
                 content: row.get(3)?,
-                created_at: row.get(4)?,
+                reasoning: row.get(4)?,
+                created_at: row.get(5)?,
             })
         })?;
         let mut result = Vec::new();

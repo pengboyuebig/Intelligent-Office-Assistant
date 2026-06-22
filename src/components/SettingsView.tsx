@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, CheckCircle, XCircle, Database, Server, ArrowRight } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Database, Server, ArrowRight, UserCircle, Users, LogIn, UserPlus, Eye, EyeOff } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -85,12 +85,66 @@ export default function SettingsView() {
   const [testChroma, setTestChroma] = useState<{ status: string; msg: string }>({ status: "idle", msg: "" });
   const [testRemoteDb, setTestRemoteDb] = useState<{ status: string; msg: string }>({ status: "idle", msg: "" });
 
+  // 登录/切换用户弹窗
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+
+  // 新建用户弹窗（仅 admin）
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [newUserId, setNewUserId] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState("user");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createSuccess, setCreateSuccess] = useState("");
+
+  const isAdmin = store.currentUser?.role === "admin";
   const isDeepSeek = store.llmProvider === "deepseek";
 
   // 加载设置（只在挂载时执行一次）
   useEffect(() => {
     store.loadSettings();
+    store.loadCurrentUser();
   }, []);
+
+  const handleLogin = async () => {
+    setLoginLoading(true);
+    setLoginError("");
+    try {
+      await store.login(loginUsername, loginPassword);
+      setLoginUsername("");
+      setLoginPassword("");
+      setShowLoginDialog(false);
+    } catch (e: any) {
+      setLoginError(typeof e === "string" ? e : e?.message || "登录失败");
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    setCreateLoading(true);
+    setCreateError("");
+    setCreateSuccess("");
+    try {
+      await store.createUser(newUserId, newUsername, newPassword, newRole);
+      setCreateSuccess(`用户 ${newUsername} 创建成功`);
+      setNewUserId("");
+      setNewUsername("");
+      setNewPassword("");
+      setNewRole("user");
+      setTimeout(() => setCreateSuccess(""), 2000);
+    } catch (e: any) {
+      setCreateError(typeof e === "string" ? e : e?.message || "创建用户失败");
+    } finally {
+      setCreateLoading(false);
+    }
+  };
 
   const updateSetting = async (key: string, value: string) => {
     await store.updateSetting(key, value);
@@ -145,6 +199,176 @@ export default function SettingsView() {
       </div>
 
       <div className="max-w-2xl mx-auto px-8 py-6 space-y-4">
+
+        {/* ===== 当前用户 ===== */}
+        <SettingsSection icon={<UserCircle size={18} />} title="当前用户" desc="查看当前账号权限，切换登录用户">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+                <Users size={18} />
+              </div>
+              <div>
+                <p className="text-sm font-medium">{store.currentUser?.username || "未登录"}</p>
+                <p className="text-xs text-muted-foreground">
+                  角色: {isAdmin ? "管理员" : "普通用户"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <button
+                  onClick={() => setShowCreateDialog(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-accent flex items-center gap-1.5"
+                >
+                  <UserPlus size={13} /> 新建用户
+                </button>
+              )}
+              <button
+                onClick={() => setShowLoginDialog(true)}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 flex items-center gap-1.5"
+              >
+                <LogIn size={13} /> 切换用户
+              </button>
+            </div>
+          </div>
+        </SettingsSection>
+
+        {/* ===== 登录弹窗 ===== */}
+        {showLoginDialog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-lg p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">切换用户</h3>
+                <button onClick={() => setShowLoginDialog(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">用户名</label>
+                  <input
+                    type="text"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                    placeholder="admin / ptyh"
+                    className="input w-full text-sm"
+                    onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">密码</label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="••••••"
+                      className="input w-full text-sm pr-9"
+                      onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+                {loginError && (
+                  <p className="text-xs text-destructive">{loginError}</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowLoginDialog(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-medium border border-border hover:bg-accent"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleLogin}
+                  disabled={loginLoading || !loginUsername || !loginPassword}
+                  className="px-4 py-2 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {loginLoading && <Loader2 size={12} className="animate-spin" />}
+                  登录
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ===== 新建用户弹窗（仅 admin） ===== */}
+        {showCreateDialog && isAdmin && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-lg p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">新建用户</h3>
+                <button onClick={() => setShowCreateDialog(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+              </div>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">用户 ID</label>
+                  <input
+                    type="text"
+                    value={newUserId}
+                    onChange={(e) => setNewUserId(e.target.value)}
+                    placeholder="唯一标识，如 zhangsan"
+                    className="input w-full text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">用户名</label>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    placeholder="登录账号"
+                    className="input w-full text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">密码</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••"
+                    className="input w-full text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">角色</label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value)}
+                    className="input w-full text-sm"
+                  >
+                    <option value="user">普通用户</option>
+                    <option value="admin">管理员</option>
+                  </select>
+                </div>
+                {createError && <p className="text-xs text-destructive">{createError}</p>}
+                {createSuccess && <p className="text-xs text-green-600">{createSuccess}</p>}
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setShowCreateDialog(false)}
+                  className="px-4 py-2 rounded-lg text-xs font-medium border border-border hover:bg-accent"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleCreateUser}
+                  disabled={createLoading || !newUserId || !newUsername || !newPassword}
+                  className="px-4 py-2 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {createLoading && <Loader2 size={12} className="animate-spin" />}
+                  创建
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ===== LLM 服务 ===== */}
         <SettingsSection icon={<Server size={18} />} title="LLM 服务" desc="选择推理服务提供方">

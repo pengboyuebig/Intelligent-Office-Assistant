@@ -111,6 +111,11 @@ pub fn run() {
             commands::settings::get_setting,
             commands::settings::set_setting,
             commands::settings::get_all_settings,
+            // users
+            commands::users::get_current_user,
+            commands::users::login,
+            commands::users::switch_user,
+            commands::users::create_user,
             // chat proxy
             commands::chat_proxy::chat_stream_proxy,
             commands::chat_proxy::cancel_chat_stream,

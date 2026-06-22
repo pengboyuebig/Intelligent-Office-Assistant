@@ -47,8 +47,12 @@ function buildApiMessages(
 ) {
   const apiMessages: { role: string; content: string }[] = [];
 
+  // 强制中文回复
+  const languagePrompt = "请始终使用中文回答用户的问题，不要输出任何英文。";
   if (skillSystemPrompt) {
-    apiMessages.push({ role: "system", content: skillSystemPrompt });
+    apiMessages.push({ role: "system", content: `${skillSystemPrompt}\n\n${languagePrompt}` });
+  } else {
+    apiMessages.push({ role: "system", content: languagePrompt });
   }
   if (knowledgeContext) {
     apiMessages.push({ role: "system", content: `参考以下知识：\n${knowledgeContext}` });
@@ -78,14 +82,15 @@ async function initializeStreamListeners() {
   await ensureChatStreamListeners({
     getTaskId: () => useChatStore.getState().currentTaskId,
     getCurrentConversationId: () => useChatStore.getState().currentId,
-    appendChunk: (_taskId, text) => {
+    appendChunk: (_taskId, content, reasoning) => {
       useChatStore.setState((state) => {
         const messages = [...state.messages];
         const streamIndex = messages.findIndex((message) => message.id === "streaming");
         if (streamIndex >= 0) {
           messages[streamIndex] = {
             ...messages[streamIndex],
-            content: messages[streamIndex].content + text,
+            content: messages[streamIndex].content + content,
+            reasoning: (messages[streamIndex].reasoning || "") + reasoning,
           };
           return { messages };
         }
@@ -96,7 +101,8 @@ async function initializeStreamListeners() {
 
         messages.push({
           ...getStreamingPlaceholder(state.currentId),
-          content: text,
+          content,
+          reasoning,
         });
         return { messages };
       });
@@ -115,12 +121,14 @@ async function initializeStreamListeners() {
 
       const completedMessage = messageFactory();
       completedMessage.content = currentMessages[streamIndex].content || "(空回复)";
+      completedMessage.reasoning = currentMessages[streamIndex].reasoning;
 
       try {
         const savedMessage = await invoke<Message>("add_message", {
           conversationId: currentId,
           role: "assistant",
           content: completedMessage.content,
+          reasoning: completedMessage.reasoning || "",
         });
         completedMessage.id = savedMessage.id;
         completedMessage.created_at = savedMessage.created_at;
@@ -251,18 +259,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     try {
       const apiBase = settings.apiBaseUrl.replace(/\/+$/, "");
-      const isLocal =
-        apiBase.includes("localhost") ||
-        apiBase.includes("127.0.0.1") ||
-        apiBase.startsWith("http://10.") ||
-        apiBase.startsWith("http://192.168.");
 
       const trimmedApiKey = settings.apiKey?.trim();
       const apiKey = trimmedApiKey ? trimmedApiKey : undefined;
 
-      if (!apiKey && !isLocal) {
+      if (!apiKey && settings.requiresKey) {
         throw new Error(
-          "当前目标地址不是本地服务，且未配置 API Key。请在设置中填写 API Key 后再试。",
+          "当前服务商需要 API Key，但未配置。请在设置中填写 API Key 后再试。",
         );
       }
 
@@ -278,7 +281,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const message = error instanceof Error ? error.message : String(error);
       let userMessage = message;
       if (message.includes("401") || message.toLowerCase().includes("authentication") || message.toLowerCase().includes("unauthorized")) {
-        userMessage = settings.apiKey
+        userMessage = settings.apiKey?.trim()
           ? `API 鉴权失败：当前 API Key 无效或已过期。请检查设置中的 API Key。\n原始错误：${message}`
           : `API 鉴权失败：当前未配置 API Key。请在设置中填写 API Key（DeepSeek 需填写 deepseek_api_key；Ollama 若使用远程地址也可能需要 Key）。\n原始错误：${message}`;
       }

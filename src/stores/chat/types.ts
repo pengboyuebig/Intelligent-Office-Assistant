@@ -12,5 +12,6 @@ export interface Message {
   conversation_id: string;
   role: string;
   content: string;
+  reasoning?: string;
   created_at: string;
 }

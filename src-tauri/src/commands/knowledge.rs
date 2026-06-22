@@ -470,31 +470,55 @@ async fn upload_local_document(
         .ok_or_else(|| "Document creation failed".to_string())
 }
 
+fn get_current_user_info(db: &Database) -> Result<(String, bool), String> {
+    let user = db
+        .get_current_user()
+        .map_err(|e| format!("获取当前用户失败: {e}"))?
+        .ok_or_else(|| "当前用户未设置".to_string())?;
+    let user_id = user["id"].as_str().unwrap_or("").to_string();
+    let is_admin = user["role"].as_str().unwrap_or("") == "admin";
+    Ok((user_id, is_admin))
+}
+
 #[tauri::command]
 pub async fn create_knowledge_base(
     db: State<'_, Database>,
     remote_db: State<'_, Arc<RemoteDbPool>>,
     name: String,
     description: String,
+    is_public: Option<bool>,
 ) -> Result<KnowledgeBase, String> {
+    let (user_id, is_admin) = get_current_user_info(&db)?;
+    if !is_admin {
+        return Err("只有管理员可以创建知识库".to_string());
+    }
+    let is_public = is_public.unwrap_or(false);
+    let owner_id = if is_public { "system".to_string() } else { user_id.clone() };
+
     if let Ok(pool) = remote_db.pool().await {
         let id = uuid::Uuid::new_v4().to_string();
-        sqlx::query("INSERT INTO knowledge_bases (id, name, description) VALUES ($1, $2, $3)")
-            .bind(&id)
-            .bind(&name)
-            .bind(&description)
-            .execute(&*pool)
-            .await
-            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO knowledge_bases (id, name, description, owner_id, is_public) VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(&id)
+        .bind(&name)
+        .bind(&description)
+        .bind(&owner_id)
+        .bind(if is_public { 1 } else { 0 })
+        .execute(&*pool)
+        .await
+        .map_err(|e| e.to_string())?;
         return Ok(KnowledgeBase {
             id,
             name,
             description,
+            owner_id,
+            is_public,
             created_at: String::new(),
         });
     }
 
-    db.create_knowledge_base(&name, &description)
+    db.create_knowledge_base(&name, &description, &owner_id, is_public)
         .map_err(|e| e.to_string())
 }
 
@@ -503,12 +527,24 @@ pub async fn get_knowledge_bases(
     db: State<'_, Database>,
     remote_db: State<'_, Arc<RemoteDbPool>>,
 ) -> Result<Vec<KnowledgeBase>, String> {
+    let (user_id, is_admin) = get_current_user_info(&db)?;
+
     if let Ok(pool) = remote_db.pool().await {
-        let rows = sqlx::query_as::<_, (String, String, String, String)>(
-            "SELECT id, name, description, created_at FROM knowledge_bases ORDER BY created_at DESC",
-        )
-        .fetch_all(&*pool)
-        .await
+        let rows = if is_admin {
+            sqlx::query_as::<_, (String, String, String, String, i32, String)>(
+                "SELECT id, name, description, owner_id, is_public, created_at FROM knowledge_bases WHERE owner_id='system' OR owner_id=$1 ORDER BY created_at DESC",
+            )
+            .bind(&user_id)
+            .fetch_all(&*pool)
+            .await
+        } else {
+            sqlx::query_as::<_, (String, String, String, String, i32, String)>(
+                "SELECT id, name, description, owner_id, is_public, created_at FROM knowledge_bases WHERE is_public=1 OR owner_id=$1 ORDER BY created_at DESC",
+            )
+            .bind(&user_id)
+            .fetch_all(&*pool)
+            .await
+        }
         .map_err(|e| e.to_string())?;
 
         return Ok(rows
@@ -517,12 +553,15 @@ pub async fn get_knowledge_bases(
                 id: row.0,
                 name: row.1,
                 description: row.2,
-                created_at: row.3,
+                owner_id: row.3,
+                is_public: row.4 == 1,
+                created_at: row.5,
             })
             .collect());
     }
 
-    db.get_knowledge_bases().map_err(|e| e.to_string())
+    db.get_knowledge_bases(&user_id, is_admin)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -531,6 +570,11 @@ pub async fn delete_knowledge_base(
     remote_db: State<'_, Arc<RemoteDbPool>>,
     id: String,
 ) -> Result<(), String> {
+    let (_user_id, is_admin) = get_current_user_info(&db)?;
+    if !is_admin {
+        return Err("只有管理员可以删除知识库".to_string());
+    }
+
     if let Ok(pool) = remote_db.pool().await {
         sqlx::query("DELETE FROM knowledge_bases WHERE id = $1")
             .bind(&id)
@@ -540,7 +584,9 @@ pub async fn delete_knowledge_base(
         return Ok(());
     }
 
-    db.delete_knowledge_base(&id).map_err(|e| e.to_string())
+    db.delete_knowledge_base(&id)
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -606,6 +652,11 @@ pub async fn upload_document(
     content: String,
     content_type: Option<String>,
 ) -> Result<Document, String> {
+    let (_user_id, is_admin) = get_current_user_info(&db)?;
+    if !is_admin {
+        return Err("只有管理员可以上传文档".to_string());
+    }
+
     let text = decode_document_content(&filename, &content, content_type.as_deref())?;
     if text.trim().is_empty() {
         return Err("Document content is empty".to_string());

@@ -4,6 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 const SETTINGS_KEY = "swift_settings";
 const SENSITIVE_FIELDS = new Set(["deepseekApiKey", "remoteDbUrl"]);
 
+interface UserInfo {
+  id: string;
+  username: string;
+  role: "admin" | "user";
+}
+
 interface SettingsState {
   llmProvider: string;
   apiBaseUrl: string;
@@ -18,8 +24,13 @@ interface SettingsState {
   chromaCollection: string;
   remoteDbUrl: string;
   remoteDbEnabled: boolean;
+  currentUser: UserInfo | null;
   loadSettings: () => Promise<void>;
   updateSetting: (key: string, value: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  switchUser: (userId: string) => Promise<void>;
+  createUser: (id: string, username: string, password: string, role: string) => Promise<void>;
+  loadCurrentUser: () => Promise<void>;
 }
 
 function sanitizeForStorage(state: SettingsState) {
@@ -35,6 +46,7 @@ function sanitizeForStorage(state: SettingsState) {
     chromaEnabled: state.chromaEnabled,
     chromaCollection: state.chromaCollection,
     remoteDbEnabled: state.remoteDbEnabled,
+    currentUser: state.currentUser,
   };
 }
 
@@ -60,6 +72,7 @@ function loadInitialSettings() {
       chromaCollection: settings.chromaCollection || settings.chroma_collection || "knowledge_chunks",
       remoteDbUrl: "",
       remoteDbEnabled: settings.remoteDbEnabled === true || settings.remote_db_enabled === "true",
+        currentUser: settings.currentUser || null,
     };
   } catch {
     return null;
@@ -88,6 +101,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   chromaCollection: initial?.chromaCollection || "knowledge_chunks",
   remoteDbUrl: "",
   remoteDbEnabled: initial?.remoteDbEnabled || false,
+  currentUser: initial?.currentUser || null,
 
   loadSettings: async () => {
     try {
@@ -117,6 +131,44 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       console.warn("从后端加载设置失败", error);
     }
+  },
+
+  loadCurrentUser: async () => {
+    try {
+      const user = await invoke<UserInfo | null>('get_current_user');
+      if (user) {
+        set({ currentUser: user });
+        saveToStorage({ ...get(), currentUser: user });
+      }
+    } catch (error) {
+      console.warn('加载当前用户失败', error);
+    }
+  },
+
+  switchUser: async (userId: string) => {
+    try {
+      await invoke('switch_user', { userId });
+      const user = await invoke<UserInfo | null>('get_current_user');
+      set({ currentUser: user });
+      saveToStorage({ ...get(), currentUser: user });
+    } catch (error) {
+      console.warn('切换用户失败', error);
+      throw error;
+    }
+  },
+
+  login: async (username: string, password: string) => {
+    const user = await invoke<UserInfo | null>('login', { username, password });
+    if (!user) {
+      throw new Error('用户名或密码错误');
+    }
+    await invoke('switch_user', { userId: user.id });
+    set({ currentUser: user });
+    saveToStorage({ ...get(), currentUser: user });
+  },
+
+  createUser: async (id: string, username: string, password: string, role: string) => {
+    await invoke('create_user', { id, username, password, role });
   },
 
   updateSetting: async (key: string, value: string) => {

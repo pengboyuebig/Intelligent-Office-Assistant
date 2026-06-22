@@ -21,7 +21,7 @@ interface StreamErrorPayload {
 interface ChatStreamBindings {
   getTaskId: () => string | null;
   getCurrentConversationId: () => string | null;
-  appendChunk: (taskId: string, text: string) => void;
+  appendChunk: (taskId: string, content: string, reasoning: string) => void;
   finishStream: (taskId: string, messageFactory: () => Message) => void;
   failStream: (taskId: string, error: string) => void;
 }
@@ -43,12 +43,13 @@ export async function ensureChatStreamListeners(bindings: ChatStreamBindings) {
       return;
     }
 
-    const text = event.payload.content || event.payload.reasoning;
-    if (!text) {
+    const content = event.payload.content || "";
+    const reasoning = event.payload.reasoning || "";
+    if (!content && !reasoning) {
       return;
     }
 
-    bindings.appendChunk(event.payload.task_id, text);
+    bindings.appendChunk(event.payload.task_id, content, reasoning);
   });
 
   unlistenDone = await listen<StreamResultPayload>("chat-stream-done", (event) => {

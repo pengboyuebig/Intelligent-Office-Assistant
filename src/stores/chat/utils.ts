@@ -13,6 +13,8 @@ export function getChatSettings() {
       : settings.deepseekModel || "deepseek-chat";
 
   return {
+    provider: isDeepSeek ? "deepseek" : "ollama",
+    requiresKey: isDeepSeek,
     apiBaseUrl: isDeepSeek
       ? settings.deepseekBaseUrl || "https://api.deepseek.com/v1"
       : settings.apiBaseUrl || "http://10.1.42.164:11434/v1",

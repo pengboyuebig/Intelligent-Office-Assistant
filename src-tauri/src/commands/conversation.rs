@@ -49,8 +49,9 @@ pub fn add_message(
     conversation_id: String,
     role: String,
     content: String,
+    reasoning: Option<String>,
 ) -> Result<Message, String> {
-    db.add_message(&conversation_id, &role, &content)
+    db.add_message(&conversation_id, &role, &content, reasoning.as_deref())
         .map_err(|e| e.to_string())
 }
 

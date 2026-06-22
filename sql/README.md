@@ -1,16 +1,17 @@
 # chromaVersion SQL 汇总
 
 > 生成时间：2026-06-16
-> 用途：部署参考 / DBA  review
+> 用途：部署参考 / DBA review
 
 ## 文件说明
 
 | 文件 | 数据库 | 用途 |
 |------|--------|------|
-| `schema_sqlite.sql` | SQLite | 本地离线数据库建表、索引、默认配置 |
-| `schema_postgres.sql` | PostgreSQL | 远程共享数据库建表、索引 |
+| `schema_sqlite.sql` | SQLite | 本地离线数据库建表、索引、默认配置、默认用户（全新部署） |
+| `schema_postgres.sql` | PostgreSQL | 远程共享数据库建表、索引、默认用户（全新部署） |
+| `migrate_postgres_to_rbac.sql` | PostgreSQL | 旧库升级到带 `users` / `owner_id` / `is_public` 的 RBAC 版本 |
 
-> 注：SQLite schema 由 Rust 后端在首次启动时自动执行；PostgreSQL schema 在首次连接远程数据库时自动执行。部署时也可以预先手动执行这两个文件。
+> 注：SQLite schema 由 Rust 后端在首次启动时自动执行；PostgreSQL schema 在首次连接远程数据库时自动执行。部署时也可以预先手动执行这两个文件。如果远程 PostgreSQL 已经存在旧版数据（没有 `users`、`owner_id`、`is_public`），请执行 `migrate_postgres_to_rbac.sql` 进行升级。
 
 ---
 
@@ -37,8 +38,20 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system', 'tool')),
     content TEXT NOT NULL DEFAULT '',
+    reasoning TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+```
+
+#### users（本地账号 + RBAC）
+```sql
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 ```
 
@@ -48,6 +61,8 @@ CREATE TABLE IF NOT EXISTS knowledge_bases (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
+    owner_id TEXT NOT NULL DEFAULT 'system',
+    is_public INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 ```
@@ -121,6 +136,14 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('remote_db_url', '');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('remote_db_enabled', 'false');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('chroma_endpoint', 'http://localhost:8000');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('chroma_enabled', 'false');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('current_user_id', 'ptyh');
+```
+
+### 默认用户
+
+```sql
+INSERT OR IGNORE INTO users (id, username, password, role) VALUES ('admin', 'admin', 'admin123', 'admin');
+INSERT OR IGNORE INTO users (id, username, password, role) VALUES ('ptyh', 'ptyh', 'ptyh123', 'user');
 ```
 
 ### CRUD 操作
@@ -152,7 +175,7 @@ DELETE FROM conversations WHERE id=?1;
 #### messages
 ```sql
 -- 添加消息
-INSERT INTO messages (id, conversation_id, role, content) VALUES (?1, ?2, ?3, ?4);
+INSERT INTO messages (id, conversation_id, role, content, reasoning) VALUES (?1, ?2, ?3, ?4, ?5);
 
 -- 更新对话时间
 UPDATE conversations
@@ -160,22 +183,43 @@ SET updated_at=datetime('now','localtime')
 WHERE id=?1;
 
 -- 查询某个对话的消息
-SELECT id, conversation_id, role, content, created_at
+SELECT id, conversation_id, role, content, reasoning, created_at
 FROM messages
 WHERE conversation_id=?1
 ORDER BY created_at ASC;
 ```
 
+#### users
+```sql
+-- 查询当前用户
+SELECT id, username, role FROM users WHERE id = (SELECT value FROM settings WHERE key = 'current_user_id');
+
+-- 认证（明文密码示例，生产环境建议哈希）
+SELECT id, username, role FROM users WHERE username=?1 AND password=?2;
+
+-- 切换当前用户
+INSERT OR REPLACE INTO settings (key, value) VALUES ('current_user_id', ?1);
+```
+
 #### knowledge_bases
 ```sql
--- 创建
-INSERT INTO knowledge_bases (id, name, description) VALUES (?1, ?2, ?3);
+-- 创建（普通用户：owner_id = 当前用户，is_public = 0；管理员可创建公开库）
+INSERT INTO knowledge_bases (id, name, description, owner_id, is_public) VALUES (?1, ?2, ?3, ?4, ?5);
 
--- 列表
-SELECT id, name, description, created_at FROM knowledge_bases ORDER BY created_at DESC;
+-- 列表（管理员查看全部，普通用户查看公开或自己的）
+-- 管理员
+SELECT id, name, description, owner_id, is_public, created_at FROM knowledge_bases ORDER BY created_at DESC;
+-- 普通用户
+SELECT id, name, description, owner_id, is_public, created_at
+FROM knowledge_bases
+WHERE is_public=1 OR owner_id=?1
+ORDER BY created_at DESC;
 
--- 删除（级联删除 documents / chunks）
+-- 删除（管理员可删除全部，普通用户只能删除自己的）
+-- 管理员
 DELETE FROM knowledge_bases WHERE id=?1;
+-- 普通用户
+DELETE FROM knowledge_bases WHERE id=?1 AND owner_id=?2;
 ```
 
 #### documents
@@ -243,12 +287,25 @@ INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2);
 
 ### 建表
 
+#### users（共享账号 + RBAC）
+```sql
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    created_at TEXT NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')::TEXT
+);
+```
+
 #### knowledge_bases
 ```sql
 CREATE TABLE IF NOT EXISTS knowledge_bases (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
+    owner_id TEXT NOT NULL DEFAULT 'system',
+    is_public INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')::TEXT
 );
 ```
@@ -284,7 +341,7 @@ CREATE TABLE IF NOT EXISTS skills (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     group_id TEXT DEFAULT '',
-    system_prompt TEXT NOT NULL DEFAULT 'help',
+    system_prompt TEXT NOT NULL DEFAULT '你是一个有用的助手。',
     tools_md TEXT DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')::TEXT,
     updated_at TEXT NOT NULL DEFAULT (now() AT TIME ZONE 'Asia/Shanghai')::TEXT
@@ -299,17 +356,48 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_kb ON chunks(knowledge_base_id);
 ```
 
+### 默认用户
+
+```sql
+INSERT INTO users (id, username, password, role) VALUES ('admin', 'admin', 'admin123', 'admin')
+    ON CONFLICT (id) DO NOTHING;
+INSERT INTO users (id, username, password, role) VALUES ('ptyh', 'ptyh', 'ptyh123', 'user')
+    ON CONFLICT (id) DO NOTHING;
+```
+
 ### CRUD 操作
+
+#### users
+```sql
+-- 查询当前用户
+SELECT id, username, role FROM users WHERE id = (SELECT value FROM settings WHERE key = 'current_user_id');
+
+-- 认证
+SELECT id, username, role FROM users WHERE username=$1 AND password=$2;
+```
 
 #### knowledge_bases
 ```sql
-INSERT INTO knowledge_bases (id, name, description) VALUES ($1, $2, $3);
+-- 创建
+INSERT INTO knowledge_bases (id, name, description, owner_id, is_public)
+VALUES ($1, $2, $3, $4, $5);
 
-SELECT id, name, description, created_at
+-- 列表（管理员查看全部）
+SELECT id, name, description, owner_id, is_public, created_at
 FROM knowledge_bases
 ORDER BY created_at DESC;
 
+-- 列表（普通用户查看公开或自己的）
+SELECT id, name, description, owner_id, is_public, created_at
+FROM knowledge_bases
+WHERE is_public=1 OR owner_id=$1
+ORDER BY created_at DESC;
+
+-- 删除（管理员）
 DELETE FROM knowledge_bases WHERE id = $1;
+
+-- 删除（普通用户，仅自己的）
+DELETE FROM knowledge_bases WHERE id = $1 AND owner_id = $2;
 ```
 
 #### documents
@@ -373,7 +461,20 @@ LIMIT $1;
 
 ---
 
-## 三、部署建议
+## 三、权限模型说明
+
+| 角色 | 知识库创建 | 公共知识库 | 知识库删除 | 文档上传 |
+|------|-----------|-----------|-----------|---------|
+| admin | 可创建 | 可创建公开库（owner_id = 'system'） | 可删除全部 | 可上传到任意库 |
+| user | 可创建 | 不可创建公开库 | 仅删除自己的 | 仅上传到可访问的库 |
+
+- `is_public = 1` 表示公开库，所有用户可见。
+- `is_public = 0` 且 `owner_id = 'system'` 表示管理员创建的私有系统库。
+- `is_public = 0` 且 `owner_id = 当前用户ID` 表示普通用户的私有库。
+
+---
+
+## 四、部署建议
 
 1. **本地 SQLite**：无需预先执行，应用首次启动会自动创建。如需预置，可手动执行 `schema_sqlite.sql`。
 2. **远程 PostgreSQL**：建议由 DBA 预先执行 `schema_postgres.sql`，并授予应用账号 `INSERT/SELECT/UPDATE/DELETE` 权限。
@@ -382,3 +483,4 @@ LIMIT $1;
    postgres://username:password@host:5432/database
    ```
 4. **注意**：PostgreSQL 远程库目前不包含 `conversations` / `messages` 表，对话记录仍保存在本地 SQLite 中。
+5. **安全建议**：默认用户密码仅用于测试/首次登录，生产环境应在首次部署后修改 `admin` 和 `ptyh` 的密码。

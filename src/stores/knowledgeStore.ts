@@ -5,6 +5,8 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   description: string;
+  owner_id: string;
+  is_public: boolean;
   created_at: string;
 }
 
@@ -31,7 +33,7 @@ interface KnowledgeState {
   loading: boolean;
   chunkCount: number;
   loadBases: () => Promise<void>;
-  createBase: (name: string, description: string) => Promise<void>;
+  createBase: (name: string, description: string, isPublic?: boolean) => Promise<void>;
   deleteBase: (id: string) => Promise<void>;
   selectBase: (id: string) => Promise<void>;
   uploadDocument: (kbId: string, filename: string, content: string, contentType?: string) => Promise<void>;
@@ -56,9 +58,9 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     }
   },
 
-  createBase: async (name: string, description: string) => {
+  createBase: async (name: string, description: string, isPublic?: boolean) => {
     try {
-      await invoke("create_knowledge_base", { name, description });
+      await invoke("create_knowledge_base", { name, description, isPublic: isPublic ?? false });
       await get().loadBases();
     } catch (e) {
       console.error("创建知识库失败:", e);
@@ -107,6 +109,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     } catch (e) {
       console.error("上传文档失败:", e);
       set({ loading: false });
+      throw e;
     }
   },
 

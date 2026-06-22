@@ -4,3 +4,4 @@ pub mod knowledge;
 pub mod knowledge_search;
 pub mod settings;
 pub mod skill;
+pub mod users;

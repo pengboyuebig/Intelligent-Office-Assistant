@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, ChevronDown, ChevronRight } from "lucide-react";
 import { useChatStore, Message } from "@/stores/chatStore";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +36,28 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
       <pre className="bg-muted/80 p-4 pt-8 rounded-lg overflow-x-auto text-sm">
         <code className={cn(language && `language-${language}`)}>{code}</code>
       </pre>
+    </div>
+  );
+}
+
+function ReasoningBlock({ reasoning }: { reasoning?: string }) {
+  const [expanded, setExpanded] = useState(true);
+  if (!reasoning?.trim()) return null;
+
+  return (
+    <div className="mb-2 border border-border/60 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground bg-muted/40 hover:bg-muted/60 transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        思考过程
+      </button>
+      {expanded && (
+        <div className="px-3 py-2 text-xs text-muted-foreground/80 bg-muted/20 whitespace-pre-wrap leading-relaxed">
+          {reasoning.trim()}
+        </div>
+      )}
     </div>
   );
 }
@@ -110,6 +132,7 @@ function MessageBubble({ msg, isStreaming }: { msg: Message; isStreaming?: boole
             <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
           ) : (
             <div className="markdown-body text-sm leading-relaxed">
+              <ReasoningBlock reasoning={msg.reasoning} />
               {msg.content ? (
                 isStreaming ? (
                   <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
@@ -119,7 +142,7 @@ function MessageBubble({ msg, isStreaming }: { msg: Message; isStreaming?: boole
                   </ReactMarkdown>
                 )
               ) : null}
-              {isStreaming && !msg.content && (
+              {isStreaming && !msg.content && !msg.reasoning && (
                 <span className="thinking-dots">
                   思考中
                   <span className="dot1">.</span>
@@ -156,6 +179,7 @@ const MemoMessageBubble = memo(MessageBubble, (prev, next) => {
   return (
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
+    prev.msg.reasoning === next.msg.reasoning &&
     prev.msg.role === next.msg.role &&
     prev.isStreaming === next.isStreaming
   );
