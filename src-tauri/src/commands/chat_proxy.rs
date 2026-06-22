@@ -57,6 +57,37 @@ pub async fn chat_stream_proxy(
     };
 
     let task_id = uuid::Uuid::new_v4().to_string();
+    eprintln!(
+        "[chat_stream_proxy] task_id={} chat_url={} model={} messages={} api_key={}",
+        task_id,
+        chat_url,
+        model,
+        messages.len(),
+        if api_key.as_ref().is_some_and(|key| !key.is_empty()) {
+            "已配置（已隐藏）"
+        } else {
+            "未配置"
+        }
+    );
+    for (index, message) in messages.iter().enumerate() {
+        let role = message
+            .get("role")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let content = message
+            .get("content")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let preview: String = content.chars().take(200).collect();
+        eprintln!(
+            "[chat_stream_proxy] message[{}] role={} chars={} has_knowledge={} preview={}",
+            index,
+            role,
+            content.chars().count(),
+            content.contains("参考以下知识"),
+            preview.replace('\n', "\\n")
+        );
+    }
     let cancel_flag = task_registry.start(&task_id);
     let registry = task_registry.inner().clone();
     let emit_task_id = task_id.clone();

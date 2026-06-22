@@ -71,18 +71,33 @@ export default function ChatInput() {
 
     try {
       let chunks: string[] = [];
+      const query = input.trim();
+      console.groupCollapsed("[知识库检索] 开始");
+      console.log("query:", query);
+      console.log("selectedKbId:", selectedKbId || "全部知识库");
+      console.log("bases.length:", bases.length);
       if (selectedKbId) {
         // 选择了特定知识库，只搜索该知识库
-        chunks = await useKnowledgeStore.getState().searchKnowledge(selectedKbId, input.trim());
+        chunks = await useKnowledgeStore.getState().searchKnowledge(selectedKbId, query);
       } else if (bases.length > 0) {
         // 未选择知识库则搜索全部
-        chunks = await useKnowledgeStore.getState().searchAllKnowledge(input.trim());
+        chunks = await useKnowledgeStore.getState().searchAllKnowledge(query);
+      } else {
+        console.log("未配置知识库，跳过检索");
       }
+      console.log("命中 chunks 数量:", chunks.length);
+      chunks.forEach((chunk, index) => {
+        console.log(`chunk[${index}] 长度:`, chunk.length);
+        console.log(`chunk[${index}] 预览:`, chunk.slice(0, 300));
+      });
       if (chunks.length > 0) {
         knowledgeContext = chunks.join("\n---\n");
       }
+      console.log("knowledgeContext 长度:", knowledgeContext.length);
+      console.groupEnd();
     } catch (e) {
       console.warn("知识库检索失败:", e);
+      console.groupEnd();
     }
 
     if (selectedGroupId) {

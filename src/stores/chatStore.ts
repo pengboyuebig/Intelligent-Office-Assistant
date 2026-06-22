@@ -269,10 +269,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         );
       }
 
+      const apiMessages = buildApiMessages(historyMessages, content, skillSystemPrompt, knowledgeContext);
+      console.groupCollapsed("[聊天请求] chat_stream_proxy 入参摘要");
+      console.log("apiBase:", apiBase);
+      console.log("model:", settings.chatModel);
+      console.log("apiKey:", apiKey ? "已配置（已隐藏）" : "未配置");
+      console.log("knowledgeContext 长度:", knowledgeContext?.length || 0);
+      console.log("messages 数量:", apiMessages.length);
+      apiMessages.forEach((message, index) => {
+        console.log(`messages[${index}]`, {
+          role: message.role,
+          length: message.content.length,
+          hasKnowledge: message.content.includes("参考以下知识"),
+          preview: message.content.slice(0, 300),
+        });
+      });
+      console.groupEnd();
+
       const taskId = await invoke<string>("chat_stream_proxy", {
         apiBase,
         model: settings.chatModel,
-        messages: buildApiMessages(historyMessages, content, skillSystemPrompt, knowledgeContext),
+        messages: apiMessages,
         apiKey,
       });
 

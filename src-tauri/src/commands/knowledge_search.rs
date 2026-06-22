@@ -22,6 +22,12 @@ pub async fn search_knowledge(
     query: String,
 ) -> Result<Vec<String>, String> {
     let top_k = load_top_k(&db)?;
+    eprintln!(
+        "[knowledge_search] search_knowledge kb_id={} query={} top_k={}",
+        knowledge_base_id,
+        query,
+        top_k
+    );
     let vector_results = search_vectors(
         &db,
         &chroma_adapter,
@@ -30,15 +36,37 @@ pub async fn search_knowledge(
         top_k,
     )
     .await?;
+    eprintln!(
+        "[knowledge_search] search_knowledge vector_results={}",
+        vector_results.len()
+    );
     let keyword_results =
         search_keywords(&db, &remote_db, &query, Some(&knowledge_base_id), top_k).await;
-    Ok(resolve_results(
+    eprintln!(
+        "[knowledge_search] search_knowledge keyword_results={}",
+        keyword_results.len()
+    );
+    let results = resolve_results(
         db.inner(),
         Some(&knowledge_base_id),
         keyword_results,
         vector_results,
         top_k,
-    ))
+    );
+    eprintln!(
+        "[knowledge_search] search_knowledge final_results={}",
+        results.len()
+    );
+    for (index, content) in results.iter().enumerate() {
+        let preview: String = content.chars().take(200).collect();
+        eprintln!(
+            "[knowledge_search] result[{}] chars={} preview={}",
+            index,
+            content.chars().count(),
+            preview.replace('\n', "\\n")
+        );
+    }
+    Ok(results)
 }
 
 #[tauri::command]
@@ -49,15 +77,42 @@ pub async fn search_all_knowledge(
     query: String,
 ) -> Result<Vec<String>, String> {
     let top_k = load_top_k(&db)?;
+    eprintln!(
+        "[knowledge_search] search_all_knowledge query={} top_k={}",
+        query,
+        top_k
+    );
     let vector_results = search_vectors(&db, &chroma_adapter, &query, None, top_k).await?;
+    eprintln!(
+        "[knowledge_search] search_all_knowledge vector_results={}",
+        vector_results.len()
+    );
     let keyword_results = search_keywords(&db, &remote_db, &query, None, top_k).await;
-    Ok(resolve_results(
+    eprintln!(
+        "[knowledge_search] search_all_knowledge keyword_results={}",
+        keyword_results.len()
+    );
+    let results = resolve_results(
         db.inner(),
         None,
         keyword_results,
         vector_results,
         top_k,
-    ))
+    );
+    eprintln!(
+        "[knowledge_search] search_all_knowledge final_results={}",
+        results.len()
+    );
+    for (index, content) in results.iter().enumerate() {
+        let preview: String = content.chars().take(200).collect();
+        eprintln!(
+            "[knowledge_search] result[{}] chars={} preview={}",
+            index,
+            content.chars().count(),
+            preview.replace('\n', "\\n")
+        );
+    }
+    Ok(results)
 }
 
 fn load_top_k(db: &State<'_, Database>) -> Result<usize, String> {
@@ -295,8 +350,14 @@ fn resolve_results(
 ) -> Vec<String> {
     let merged = merge_results(keyword_results, vector_results, top_k.max(5));
     if merged.is_empty() {
+        eprintln!(
+            "[knowledge_search] merged 为空，进入 fallback_local_chunks kb_id={:?} limit={}",
+            kb_id,
+            top_k.max(3)
+        );
         fallback_local_chunks(db, kb_id, top_k.max(3))
     } else {
+        eprintln!("[knowledge_search] 使用 merged 结果 count={}", merged.len());
         merged
     }
 }
