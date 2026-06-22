@@ -659,7 +659,7 @@ pub async fn test_remote_db_connection(
     remote_db: State<'_, Arc<RemoteDbPool>>,
 ) -> Result<String, String> {
     match remote_db.pool().await {
-        Ok(_) => Ok("Remote database connected".to_string()),
+        Ok(_) => Ok("远程数据库连接成功".to_string()),
         Err(error) => Err(error),
     }
 }

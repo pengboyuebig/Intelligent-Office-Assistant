@@ -49,10 +49,10 @@ impl RemoteDbPool {
             .get_or_try_init(|| async {
                 let pool = PgPoolOptions::new()
                     .max_connections(self.config.max_connections)
-                    .acquire_timeout(Duration::from_secs(5))
+                    .acquire_timeout(Duration::from_secs(30))
                     .connect(&self.config.database_url)
                     .await
-                    .map_err(|error| format!("远程数据库连接失败: {error}"))?;
+                    .map_err(|error| format!("远程数据库连接失败 [{}]: {error}", self.config.database_url))?;
 
                 initialize_schema(&pool).await?;
                 Ok(Arc::new(pool))
